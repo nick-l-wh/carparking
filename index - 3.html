@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>香港實時車位地圖</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- jQuery -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
+  <style>
+    table td, table th {
+      border: 1px solid #000;
+      padding: 5px;
+      font-size: 16px;
+      vertical-align: middle;
+    }
+    table th {
+      background-color: #1A82E4;
+      color: white;
+      height: 40px;
+    }
+    table tr:nth-child(even) {
+      background-color: #DBDBDB;
+    }
+    .district-section .toggle-bar {
+      cursor: pointer;
+      background-color: #3498db;
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      margin-bottom: 5px;
+    }
+    .district-section .content {
+      display: none;
+    }
+    .district-section .content.active {
+      display: block;
+    }
+  </style>
+</head>
+<body class="flex flex-col h-screen bg-gray-100">
+  <!-- Header -->
+  <header class="bg-blue-600 text-white p-4">
+    <h1 class="text-2xl font-bold">香港實時車位地圖</h1>
+  </header>
+  <!-- Main Content -->
+  <main class="flex flex-1 overflow-hidden">
+    <!-- Car Park Sections -->
+    <aside class="w-full md:w-1/3 bg-white p-4 overflow-y-auto">
+      <h2 class="text-xl font-semibold mb-4">停車場 (按18區分組)</h2>
+      <div id="district-sections"></div>
+      <div class="text-red-500 text-sm mt-4">* 資料不定時更新，僅供參考，實際資料請向相關停車場查詢。</div>
+    </aside>
+    <!-- Map Container -->
+    <div id="map" class="w-full md:w-2/3 h-full"></div>
+  </main>
+  <!-- Footer -->
+  <footer class="bg-gray-800 text-white p-4 text-center">
+    <p>資料來源：<a href="https://data.gov.hk" class="underline">DATA.GOV.HK</a> | 地圖來源：<a href="https://www.map.gov.hk" class="underline">香港地圖 (地政總署 GeoInfo Map)</a></p>
+  </footer>
+
+  <script>
+    // Initialize the map with Hong Kong GeoData official basemap
+    const map = L.map('map').setView([22.3193, 114.1694], 11);
+
+    // Official LandsD topographic basemap (raster)
+    const topoBasemap = L.tileLayer('https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/basemap/WGS84/{z}/{x}/{y}.png', {
+      attribution: '© 香港特別行政區政府 地政總署 Lands Department, HKSAR',
+      maxZoom: 20,
+      minZoom: 10,
+      tileSize: 256,
+      crossOrigin: 'anonymous'
+    });
+
+    // English labels overlay
+    const labels = L.tileLayer('https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/en/WGS84/{z}/{x}/{y}.png', {
+      attribution: '© Lands Department, HKSAR',
+      maxZoom: 20,
+      minZoom: 10,
+      opacity: 0.95,
+      zIndex: 1000
+    });
+
+    // Add default layers
+    topoBasemap.addTo(map);
+    labels.addTo(map);
+
+    // Simple layer control (toggle basemap and labels)
+    const baseLayers = {
+      "官方地形圖": topoBasemap
+    };
+    const overlayLayers = {
+      "地名標籤 (英文)": labels
+      // You can add more overlays here later, e.g. imagery
+    };
+    L.control.layers(baseLayers, overlayLayers, { position: 'topright' }).addTo(map);
+
+    // Store markers
+    const markers = [];
+
+    // Hong Kong's 18 districts
+    const hkDistricts = [
+      '中西區', '東區', '南區', '灣仔區', '九龍城區', '觀塘區', '深水埗區', '黃大仙區', '油尖旺區',
+      '離島區', '葵青區', '北區', '西貢區', '沙田區', '大埔區', '荃灣區', '屯門區', '元朗區'
+    ];
+
+    // Fallback data for 青華停車場
+    const chingWahFallback = {
+      type: 'car_park',
+      park_Id: 'ching_wah_manual',
+      name: '青華停車場',
+      address: '新界青衣青津街22號',
+      district: '葵青區',
+      latitude: 22.352,
+      longitude: 114.103,
+      privateCar: [],
+      update_time: '無實時資料'
+    };
+
+    // Fetch car park data
+    async function fetchCarParkData() {
+      try {
+        // Car park basic info
+        const infoResponse = await fetch('https://api.data.gov.hk/v1/carpark-info-vacancy?lang=zh_TW');
+        const infoData = await infoResponse.json();
+        // Car park vacancy
+        const vacancyResponse = await fetch('https://api.data.gov.hk/v1/carpark-info-vacancy?data=vacancy&vehicleTypes=privateCar&lang=zh_TW');
+        const vacancyData = await vacancyResponse.json();
+
+        // Merge car park data
+        let carParks = infoData.results.map(info => {
+          const vacancy = vacancyData.results.find(v => v.park_Id === info.park_Id) || {};
+          return {
+            type: 'car_park',
+            park_Id: info.park_Id,
+            name: info.name,
+            address: info.displayAddress || '無資料',
+            district: info.district || '新界區',
+            latitude: info.latitude,
+            longitude: info.longitude,
+            privateCar: vacancy.privateCar || [],
+            update_time: vacancy.privateCar?.[0]?.lastupdate || '無資料'
+          };
+        });
+
+        // Ensure 青華停車場 is included
+        const chingWahInApi = carParks.find(p => p.name === '青華停車場' || p.address.includes('青津街22號'));
+        if (!chingWahInApi) {
+          carParks.push(chingWahFallback);
+        }
+
+        displayCarParks(carParks);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        $('#district-sections').html('<p class="text-red-500">無法載入資料，請稍後再試。</p>');
+      }
+    }
+
+    // Display car parks
+    function displayCarParks(carParks) {
+      const sections = $('#district-sections');
+      sections.empty();
+      markers.forEach(m => m.marker.remove());
+      markers.length = 0;
+
+      // Group by district
+      const districtGroups = {};
+      hkDistricts.forEach(d => districtGroups[d] = []);
+
+      carParks.forEach(carPark => {
+        if (!carPark.latitude || !carPark.longitude) return;
+
+        // Manual district corrections
+        let district = carPark.district;
+        if (carPark.name.includes('油麻地')) district = '油尖旺區';
+        else if (carPark.name.includes('銅鑼灣')) district = '灣仔區';
+        else if (carPark.name.includes('尖沙咀')) district = '油尖旺區';
+        else if (carPark.name.includes('荃灣')) district = '荃灣區';
+        else if (carPark.name.includes('沙田')) district = '沙田區';
+        else if (carPark.name.includes('青華停車場')) district = '葵青區';
+        else if (!hkDistricts.includes(district)) district = '新界區';
+
+        if (hkDistricts.includes(district)) {
+          carPark.district = district;
+          districtGroups[district].push(carPark);
+        }
+      });
+
+      // Create collapsible sections
+      hkDistricts.forEach(district => {
+        const carParksInDistrict = districtGroups[district];
+        if (carParksInDistrict.length === 0) return;
+
+        const section = $('<div>').addClass('district-section mb-4');
+        const toggleBar = $('<div>').addClass('toggle-bar').text(`${district} (${carParksInDistrict.length} 個停車場)`);
+        const content = $('<div>').addClass('content');
+
+        // List
+        const list = $('<ul>').addClass('space-y-2 mb-4');
+        // Table
+        const table = $('<table>').addClass('w-full border-collapse');
+        table.append(`
+          <tr>
+            <th style="width: 50%; border-top-left-radius: 12px;">停車場名稱</th>
+            <th style="width: 15%;">地區</th>
+            <th style="width: 15%;">空置車位</th>
+            <th style="width: 20%; border-top-right-radius: 12px;">最後更新</th>
+          </tr>
+        `);
+
+        carParksInDistrict.forEach(carPark => {
+          // Marker
+          const vacancy = carPark.privateCar[0]?.vacancy || 0;
+          const markerStyle = {
+            radius: 10,
+            color: vacancy > 0 ? '#3498db' : '#95a5a6',
+            fillColor: vacancy > 0 ? '#3498db' : '#95a5a6',
+            weight: 1,
+            opacity: vacancy > 0 ? 1 : 0.5,
+            fillOpacity: vacancy > 0 ? 0.7 : 0.3
+          };
+          const marker = L.circleMarker([carPark.latitude, carPark.longitude], markerStyle).addTo(map);
+          markers.push({ marker, carPark });
+
+          // Vacancy info
+          let vacancyText = '無資料';
+          let vacancyBgColor = '#FFFFFF';
+          if (carPark.privateCar && carPark.privateCar.length > 0) {
+            const vacancyType = carPark.privateCar[0].vacancy_type || '';
+            if (vacancyType === 'A' && vacancy > 0) {
+              vacancyText = vacancy;
+              vacancyBgColor = '#50FF3E';
+            } else if ((vacancyType === 'B' || vacancyType === 'C') && vacancy > 0) {
+              vacancyText = '有空位';
+              vacancyBgColor = '#50FF3E';
+            } else {
+              vacancyText = '滿';
+              vacancyBgColor = '#FF8488';
+            }
+          }
+
+          // Popup
+          marker.bindPopup(`
+            <b>${carPark.name}</b><br>
+            地址: ${carPark.address}<br>
+            空置車位: ${vacancyText}<br>
+            最後更新: ${carPark.update_time}
+          `);
+
+          // List item
+          const li = $('<li>').addClass('p-2 bg-gray-50 rounded cursor-pointer hover:bg-gray-200').html(`
+            <div class="font-medium">${carPark.name}</div>
+            <div class="text-sm text-gray-600">${vacancyText}</div>
+          `).click(() => {
+            map.setView([carPark.latitude, carPark.longitude], 15);
+            marker.openPopup();
+          });
+          list.append(li);
+
+          // Table row
+          table.append(`
+            <tr>
+              <td>${carPark.name}<br>${carPark.address}</td>
+              <td>${district}</td>
+              <td style="background-color: ${vacancyBgColor}">${vacancyText}</td>
+              <td>${carPark.update_time}</td>
+            </tr>
+          `);
+        });
+
+        content.append(list).append(table);
+        section.append(toggleBar).append(content);
+        sections.append(section);
+
+        // Toggle functionality
+        toggleBar.click(() => {
+          content.toggleClass('active');
+        });
+      });
+    }
+
+    // Fetch data initially and every 5 minutes
+    fetchCarParkData();
+    setInterval(fetchCarParkData, 5 * 60 * 1000);
+  </script>
+</body>
+</html>
