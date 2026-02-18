@@ -41,6 +41,48 @@
     .district-section .content.active {
       display: block;
     }
+    /* Responsive layout adjustments */
+    @media (max-width: 767px) {
+      main {
+        flex-direction: column;
+      }
+      #map {
+        height: 60vh;          /* Larger map area on mobile */
+        width: 100%;
+        order: 1;
+      }
+      aside {
+        width: 100%;
+        max-height: 40vh;
+        overflow-y: auto;
+        order: 2;              /* Forces list to bottom on mobile */
+        background-color: white;
+        border-top: 1px solid #d1d5db;
+      }
+      /* Compact table/list for small screens */
+      table td, table th {
+        font-size: 14px;
+        padding: 4px;
+      }
+      aside h2 {
+        font-size: 1.25rem;
+        margin-bottom: 0.75rem;
+      }
+    }
+    @media (min-width: 768px) {
+      main {
+        flex-direction: row;
+      }
+      aside {
+        width: 33.333%;        /* ~1/3 width on desktop */
+        order: 1;              /* Left side */
+      }
+      #map {
+        flex: 1;
+        height: 100%;
+        order: 2;              /* Right side */
+      }
+    }
   </style>
 </head>
 <body class="flex flex-col h-screen bg-gray-100">
@@ -48,20 +90,28 @@
   <header class="bg-blue-600 text-white p-4">
     <h1 class="text-2xl font-bold">香港實時車位地圖</h1>
   </header>
+
   <!-- Main Content -->
   <main class="flex flex-1 overflow-hidden">
-    <!-- Car Park Sections -->
-    <aside class="w-full md:w-1/3 bg-white p-4 overflow-y-auto">
+    <!-- Car Park Sections (left on desktop, bottom on mobile) -->
+    <aside class="bg-white p-4 overflow-y-auto">
       <h2 class="text-xl font-semibold mb-4">停車場 (按18區分組)</h2>
       <div id="district-sections"></div>
-      <div class="text-red-500 text-sm mt-4">* 資料不定時更新，僅供參考，實際資料請向相關停車場查詢。</div>
+      <div class="text-red-500 text-sm mt-4">
+        * 資料不定時更新，僅供參考，實際資料請向相關停車場查詢。
+      </div>
     </aside>
-    <!-- Map Container -->
-    <div id="map" class="w-full md:w-2/3 h-full"></div>
+
+    <!-- Map Container (right on desktop, top on mobile) -->
+    <div id="map" class="flex-1"></div>
   </main>
+
   <!-- Footer -->
   <footer class="bg-gray-800 text-white p-4 text-center">
-    <p>資料來源：<a href="https://data.gov.hk" class="underline">DATA.GOV.HK</a> | 地圖來源：<a href="https://www.map.gov.hk" class="underline">香港地圖 (地政總署 GeoInfo Map)</a></p>
+    <p>
+      資料來源：<a href="https://data.gov.hk" class="underline">DATA.GOV.HK</a> | 
+      地圖來源：<a href="https://www.map.gov.hk" class="underline">香港地圖 (地政總署 GeoInfo Map)</a>
+    </p>
   </footer>
 
   <script>
@@ -90,14 +140,9 @@
     topoBasemap.addTo(map);
     labels.addTo(map);
 
-    // Simple layer control (toggle basemap and labels)
-    const baseLayers = {
-      "官方地形圖": topoBasemap
-    };
-    const overlayLayers = {
-      "地名標籤 (英文)": labels
-      // You can add more overlays here later, e.g. imagery
-    };
+    // Simple layer control
+    const baseLayers = { "官方地形圖": topoBasemap };
+    const overlayLayers = { "地名標籤 (英文)": labels };
     L.control.layers(baseLayers, overlayLayers, { position: 'topright' }).addTo(map);
 
     // Store markers
@@ -125,14 +170,11 @@
     // Fetch car park data
     async function fetchCarParkData() {
       try {
-        // Car park basic info
         const infoResponse = await fetch('https://api.data.gov.hk/v1/carpark-info-vacancy?lang=zh_TW');
         const infoData = await infoResponse.json();
-        // Car park vacancy
         const vacancyResponse = await fetch('https://api.data.gov.hk/v1/carpark-info-vacancy?data=vacancy&vehicleTypes=privateCar&lang=zh_TW');
         const vacancyData = await vacancyResponse.json();
 
-        // Merge car park data
         let carParks = infoData.results.map(info => {
           const vacancy = vacancyData.results.find(v => v.park_Id === info.park_Id) || {};
           return {
@@ -148,7 +190,6 @@
           };
         });
 
-        // Ensure 青華停車場 is included
         const chingWahInApi = carParks.find(p => p.name === '青華停車場' || p.address.includes('青津街22號'));
         if (!chingWahInApi) {
           carParks.push(chingWahFallback);
@@ -168,14 +209,12 @@
       markers.forEach(m => m.marker.remove());
       markers.length = 0;
 
-      // Group by district
       const districtGroups = {};
       hkDistricts.forEach(d => districtGroups[d] = []);
 
       carParks.forEach(carPark => {
         if (!carPark.latitude || !carPark.longitude) return;
 
-        // Manual district corrections
         let district = carPark.district;
         if (carPark.name.includes('油麻地')) district = '油尖旺區';
         else if (carPark.name.includes('銅鑼灣')) district = '灣仔區';
@@ -191,7 +230,6 @@
         }
       });
 
-      // Create collapsible sections
       hkDistricts.forEach(district => {
         const carParksInDistrict = districtGroups[district];
         if (carParksInDistrict.length === 0) return;
@@ -200,9 +238,7 @@
         const toggleBar = $('<div>').addClass('toggle-bar').text(`${district} (${carParksInDistrict.length} 個停車場)`);
         const content = $('<div>').addClass('content');
 
-        // List
         const list = $('<ul>').addClass('space-y-2 mb-4');
-        // Table
         const table = $('<table>').addClass('w-full border-collapse');
         table.append(`
           <tr>
@@ -214,7 +250,6 @@
         `);
 
         carParksInDistrict.forEach(carPark => {
-          // Marker
           const vacancy = carPark.privateCar[0]?.vacancy || 0;
           const markerStyle = {
             radius: 10,
@@ -227,7 +262,6 @@
           const marker = L.circleMarker([carPark.latitude, carPark.longitude], markerStyle).addTo(map);
           markers.push({ marker, carPark });
 
-          // Vacancy info
           let vacancyText = '無資料';
           let vacancyBgColor = '#FFFFFF';
           if (carPark.privateCar && carPark.privateCar.length > 0) {
@@ -244,7 +278,6 @@
             }
           }
 
-          // Popup
           marker.bindPopup(`
             <b>${carPark.name}</b><br>
             地址: ${carPark.address}<br>
@@ -252,7 +285,6 @@
             最後更新: ${carPark.update_time}
           `);
 
-          // List item
           const li = $('<li>').addClass('p-2 bg-gray-50 rounded cursor-pointer hover:bg-gray-200').html(`
             <div class="font-medium">${carPark.name}</div>
             <div class="text-sm text-gray-600">${vacancyText}</div>
@@ -262,7 +294,6 @@
           });
           list.append(li);
 
-          // Table row
           table.append(`
             <tr>
               <td>${carPark.name}<br>${carPark.address}</td>
@@ -277,7 +308,6 @@
         section.append(toggleBar).append(content);
         sections.append(section);
 
-        // Toggle functionality
         toggleBar.click(() => {
           content.toggleClass('active');
         });
